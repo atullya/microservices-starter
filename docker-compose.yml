@@ -19,6 +19,15 @@ services:
     environment:
       - ASPNETCORE_URLS=http://+:8080
 
+  auth-service:
+    build:
+      context: ./src/AuthService
+      dockerfile: Dockerfile
+    ports:
+      - "5003:8080"
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+
   api-gateway:
     build:
       context: ./src/ApiGateway
@@ -30,6 +39,7 @@ services:
     depends_on:
       - product-service
       - order-service
+      - auth-service
 
   frontend:
     image: nginx:alpine

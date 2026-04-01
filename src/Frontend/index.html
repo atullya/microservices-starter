@@ -290,6 +290,29 @@
             </div>
         </div>
 
+        <div class="auth-section section" style="margin-bottom: 20px;">
+            <div id="auth-unlogged">
+                <h2 style="display:inline-block; margin-right:20px;">🔒 Authentication</h2>
+                <div style="display: flex; gap: 20px; align-items: flex-end;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>Username</label>
+                        <input type="text" id="auth-username" placeholder="Username">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>Password</label>
+                        <input type="password" id="auth-password" placeholder="Password">
+                    </div>
+                    <button onclick="login()" style="width: auto;">Login</button>
+                    <button onclick="register()" style="width: auto; background: var(--text-secondary);">Register</button>
+                </div>
+                <div id="auth-message" style="margin-top: 10px;"></div>
+            </div>
+            <div id="auth-logged" style="display: none; align-items: center; justify-content: space-between;">
+                <h2>👋 Welcome, <span id="logged-user"></span>!</h2>
+                <button onclick="logout()" style="width: auto; background: #e74c3c;">Logout</button>
+            </div>
+        </div>
+
         <div class="main-content">
             <!-- Products Section -->
             <div class="section">
@@ -419,11 +442,20 @@
             }
 
             try {
+                const token = localStorage.getItem('jwt_token');
+                const headers = { 'Content-Type': 'application/json' };
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+
                 const response = await fetch(`${API_BASE}/products`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify({ name, price, description })
                 });
+
+                if (response.status === 401) {
+                    showMessage('product-message', '❌ Please login first!', 'error');
+                    return;
+                }
 
                 const result = await response.json();
                 if (result.success) {
@@ -452,11 +484,20 @@
             }
 
             try {
+                const token = localStorage.getItem('jwt_token');
+                const headers = { 'Content-Type': 'application/json' };
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+
                 const response = await fetch(`${API_BASE}/orders`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify({ productId, quantity, customerName })
                 });
+
+                if (response.status === 401) {
+                    showMessage('order-message', '❌ Please login first!', 'error');
+                    return;
+                }
 
                 const result = await response.json();
                 if (result.success) {
@@ -480,8 +521,75 @@
             setTimeout(() => { element.innerHTML = ''; }, 4000);
         }
 
+        // Auth
+        async function login() {
+            const username = document.getElementById('auth-username').value;
+            const password = document.getElementById('auth-password').value;
+            if (!username || !password) return showMessage('auth-message', 'Enter credentials', 'error');
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const result = await response.json();
+                if (response.ok && result.token) {
+                    localStorage.setItem('jwt_token', result.token);
+                    localStorage.setItem('username', username);
+                    checkAuthState();
+                    showMessage('auth-message', 'Logged in!', 'success');
+                } else {
+                    showMessage('auth-message', 'Invalid credentials', 'error');
+                }
+            } catch (e) {
+                showMessage('auth-message', 'Error logging in', 'error');
+            }
+        }
+
+        async function register() {
+            const username = document.getElementById('auth-username').value;
+            const password = document.getElementById('auth-password').value;
+            if (!username || !password) return showMessage('auth-message', 'Enter credentials', 'error');
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                if (response.ok) {
+                    showMessage('auth-message', 'Registered! Now login.', 'success');
+                } else {
+                    showMessage('auth-message', 'Registration failed', 'error');
+                }
+            } catch (e) {
+                showMessage('auth-message', 'Error registering', 'error');
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('jwt_token');
+            localStorage.removeItem('username');
+            checkAuthState();
+        }
+
+        function checkAuthState() {
+            const token = localStorage.getItem('jwt_token');
+            const username = localStorage.getItem('username');
+            if (token && username) {
+                document.getElementById('auth-unlogged').style.display = 'none';
+                document.getElementById('auth-logged').style.display = 'flex';
+                document.getElementById('logged-user').textContent = username;
+            } else {
+                document.getElementById('auth-unlogged').style.display = 'block';
+                document.getElementById('auth-logged').style.display = 'none';
+            }
+        }
+
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
+            checkAuthState();
             checkStatus();
             loadProducts();
             loadOrders();
