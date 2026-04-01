@@ -1,0 +1,5 @@
+<Solution>
+  <ProjectReference Include="src\ProductService\ProductService.csproj" />
+  <ProjectReference Include="src\OrderService\OrderService.csproj" />
+  <ProjectReference Include="src\ApiGateway\ApiGateway.csproj" />
+</Solution>
