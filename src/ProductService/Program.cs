@@ -1,5 +1,6 @@
 using ProductService.Models;
 using ProductService.DTOs;
+using Microsoft.OpenApi.Models;
 using System.ComponentModel.DataAnnotations;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,8 +11,37 @@ builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 
 // Add services to the container.
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, context, cancellationToken) =>
+    {
+        document.Info = new()
+        {
+            Title = "Product Service API",
+            Version = "v1",
+            Description = "ASP.NET Core microservice for managing products"
+        };
+        return Task.CompletedTask;
+    });
+});
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Product Service API",
+        Version = "v1",
+        Description = "ASP.NET Core microservice for managing products",
+        Contact = new OpenApiContact
+        {
+            Name = "Microservices Team",
+            Email = "support@microservices.com"
+        }
+    });
+});
 builder.Services.AddHealthChecks();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll",
@@ -26,7 +56,13 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.UseSwagger();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "Product Service API v1");
+        options.RoutePrefix = string.Empty;
+        options.DocumentTitle = "Product Service API Documentation";
+    });
 }
 
 app.UseCors("AllowAll");
@@ -37,14 +73,13 @@ app.MapHealthChecks("/health").WithName("HealthCheck");
 // In-memory list of products
 var products = new List<Product>
 {
-    new Product { Id = 1, Name = "Laptop", Price = 999.99m, Description = "High-performance laptop", Stock = 10 },
-    new Product { Id = 2, Name = "Mouse", Price = 19.99m, Description = "Wireless mouse", Stock = 50 },
-    new Product { Id = 3, Name = "Keyboard", Price = 79.99m, Description = "Mechanical keyboard", Stock = 25 }
+    new Product { Id = 1, Name = "Laptop", Price = 999.99m, Description = "High-performance laptop", Stock = 10, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+    new Product { Id = 2, Name = "Mouse", Price = 19.99m, Description = "Wireless mouse", Stock = 50, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+    new Product { Id = 3, Name = "Keyboard", Price = 79.99m, Description = "Mechanical keyboard", Stock = 25, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
 };
 
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
-// Get all products with pagination and filtering
 app.MapGet("/products", (int? skip, int? take, string? search, ILogger<Program> log) =>
 {
     log.LogInformation("Fetching products with skip={skip}, take={take}, search={search}", skip ?? 0, take ?? 10, search ?? "all");
@@ -76,7 +111,6 @@ app.MapGet("/products", (int? skip, int? take, string? search, ILogger<Program> 
 .WithName("GetProducts")
 .WithOpenApi();
 
-// Get product by ID
 app.MapGet("/products/{id}", (int id, ILogger<Program> log) =>
 {
     log.LogInformation("Fetching product with id={id}", id);
@@ -103,7 +137,6 @@ app.MapGet("/products/{id}", (int id, ILogger<Program> log) =>
 .WithName("GetProduct")
 .WithOpenApi();
 
-// Create product
 app.MapPost("/products", (CreateProductRequest request, ILogger<Program> log) =>
 {
     log.LogInformation("Creating product: {name}", request.Name);
@@ -152,7 +185,6 @@ app.MapPost("/products", (CreateProductRequest request, ILogger<Program> log) =>
 .WithName("CreateProduct")
 .WithOpenApi();
 
-// Update product
 app.MapPut("/products/{id}", (int id, CreateProductRequest request, ILogger<Program> log) =>
 {
     log.LogInformation("Updating product with id={id}", id);
@@ -203,7 +235,6 @@ app.MapPut("/products/{id}", (int id, CreateProductRequest request, ILogger<Prog
 .WithName("UpdateProduct")
 .WithOpenApi();
 
-// Delete product
 app.MapDelete("/products/{id}", (int id, ILogger<Program> log) =>
 {
     log.LogInformation("Deleting product with id={id}", id);
