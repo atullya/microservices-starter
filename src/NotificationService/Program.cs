@@ -7,6 +7,26 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
+builder.Logging.AddEventLog();
+
+// Configure logging levels
+builder.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options =>
+{
+    options.LogToStandardErrorThreshold = LogLevel.Warning;
+});
+
+// Add logging configuration
+builder.Host.ConfigureLogging(logging =>
+{
+    logging.SetMinimumLevel(LogLevel.Information);
+    logging.AddConsole(options => options.TimestampFormat = "[yyyy-MM-dd HH:mm:ss] ");
+    logging.AddDebug();
+});
+
+// Add Logging
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
 
 // Add services to the container.
 builder.Services.AddOpenApi(options =>
@@ -52,6 +72,34 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// Add request logging middleware
+app.Use(async (context, next) =>
+{
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    
+    logger.LogInformation("[REQ:{requestId}] {method} {path} from {remoteIp}", 
+        requestId, context.Request.Method, context.Request.Path, context.Connection.RemoteIpAddress);
+    
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    
+    try
+    {
+        await next.Invoke();
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[REQ:{requestId}] Unhandled exception", requestId);
+        throw;
+    }
+    finally
+    {
+        stopwatch.Stop();
+        logger.LogInformation("[REQ:{requestId}] {method} {path} - {statusCode} in {elapsedMs}ms", 
+            requestId, context.Request.Method, context.Request.Path, context.Response.StatusCode, stopwatch.ElapsedMilliseconds);
+    }
+});
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -74,33 +122,51 @@ var notifications = new List<Notification>();
 
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
+// Log service startup
+logger.LogInformation("🚀 Notification Service starting up on {timestamp}", DateTime.UtcNow);
+logger.LogInformation("📊 Environment: {environment}", app.Environment.EnvironmentName);
+logger.LogInformation("🌐 Service URLs: {urls}", string.Join(", ", app.Urls));
+logger.LogInformation("📬 Initial notification count: {count}", notifications.Count);
+
 // Get all notifications
 app.MapGet("/notifications", (int? skip, int? take, string? status, ILogger<Program> log) =>
 {
-    log.LogInformation("Fetching notifications with skip={skip}, take={take}, status={status}", skip ?? 0, take ?? 10, status ?? "all");
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    log.LogInformation("[REQ:{requestId}] 📋 Fetching notifications with skip={skip}, take={take}, status='{status}'", requestId, skip ?? 0, take ?? 10, status ?? "all");
     
-    var query = notifications.AsEnumerable();
-    
-    // Apply status filter
-    if (!string.IsNullOrWhiteSpace(status))
+    try
     {
-        query = query.Where(n => n.Status.Equals(status, StringComparison.OrdinalIgnoreCase));
+        var query = notifications.AsEnumerable();
+        
+        // Apply status filter
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(n => n.Status.Equals(status, StringComparison.OrdinalIgnoreCase));
+            log.LogInformation("[REQ:{requestId}] 🔍 Applied status filter: '{status}'", requestId, status);
+        }
+        
+        var total = query.Count();
+        
+        // Apply pagination
+        var pageSize = take ?? 10;
+        var pageSkip = skip ?? 0;
+        var result = query.OrderByDescending(n => n.CreatedAt).Skip(pageSkip).Take(pageSize).ToList();
+        
+        log.LogInformation("[REQ:{requestId}] ✅ Successfully retrieved {count} notifications (total: {total})", requestId, result.Count, total);
+        
+        return Results.Ok(new
+        {
+            success = true,
+            message = "Notifications retrieved successfully",
+            data = result,
+            pagination = new { skip = pageSkip, take = pageSize, total }
+        });
     }
-    
-    var total = query.Count();
-    
-    // Apply pagination
-    var pageSize = take ?? 10;
-    var pageSkip = skip ?? 0;
-    var result = query.OrderByDescending(n => n.CreatedAt).Skip(pageSkip).Take(pageSize).ToList();
-    
-    return Results.Ok(new
+    catch (Exception ex)
     {
-        success = true,
-        message = "Notifications retrieved successfully",
-        data = result,
-        pagination = new { skip = pageSkip, take = pageSize, total }
-    });
+        log.LogError(ex, "[REQ:{requestId}] ❌ Error fetching notifications", requestId);
+        return Results.Problem("Internal server error while fetching notifications");
+    }
 })
 .WithName("GetNotifications")
 .WithOpenApi();
@@ -135,39 +201,49 @@ app.MapGet("/notifications/{id}", (int id, ILogger<Program> log) =>
 // Create notification (internal endpoint for other services)
 app.MapPost("/notifications", (CreateNotificationRequest request, ILogger<Program> log) =>
 {
-    log.LogInformation("Creating notification: {type} for {recipient}", request.Type, request.Recipient);
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    log.LogInformation("[REQ:{requestId}] 📬 Creating notification: {type} for {recipient}", requestId, request.Type, request.Recipient);
     
-    var newNotification = new Notification
+    try
     {
-        Id = notifications.Count + 1,
-        Type = request.Type,
-        Recipient = request.Recipient,
-        Subject = request.Subject,
-        Message = request.Message,
-        Status = "Pending",
-        CreatedAt = DateTime.UtcNow,
-        SentAt = null
-    };
-    
-    notifications.Add(newNotification);
-    
-    log.LogInformation("Notification created with id={id}", newNotification.Id);
-    
-    // Simulate sending notification
-    _ = Task.Run(async () =>
+        var newNotification = new Notification
+        {
+            Id = notifications.Count + 1,
+            Type = request.Type,
+            Recipient = request.Recipient,
+            Subject = request.Subject,
+            Message = request.Message,
+            Status = "Pending",
+            CreatedAt = DateTime.UtcNow,
+            SentAt = null
+        };
+        
+        notifications.Add(newNotification);
+        
+        log.LogInformation("[REQ:{requestId}] ✅ Notification created successfully: id={id}, type={type}, recipient={recipient}", 
+            requestId, newNotification.Id, newNotification.Type, newNotification.Recipient);
+        
+        // Simulate sending notification
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(1000); // Simulate processing time
+            newNotification.Status = "Sent";
+            newNotification.SentAt = DateTime.UtcNow;
+            log.LogInformation("📨 Notification {id} sent successfully to {recipient}", newNotification.Id, newNotification.Recipient);
+        });
+        
+        return Results.Created($"/notifications/{newNotification.Id}", new
+        {
+            success = true,
+            message = "Notification created successfully",
+            data = newNotification
+        });
+    }
+    catch (Exception ex)
     {
-        await Task.Delay(1000); // Simulate processing time
-        newNotification.Status = "Sent";
-        newNotification.SentAt = DateTime.UtcNow;
-        log.LogInformation("Notification {id} sent successfully", newNotification.Id);
-    });
-    
-    return Results.Created($"/notifications/{newNotification.Id}", new
-    {
-        success = true,
-        message = "Notification created successfully",
-        data = newNotification
-    });
+        log.LogError(ex, "[REQ:{requestId}] ❌ Error creating notification: {type} for {recipient}", requestId, request.Type, request.Recipient);
+        return Results.Problem("Internal server error while creating notification");
+    }
 })
 .WithName("CreateNotification")
 .WithOpenApi();
@@ -256,6 +332,10 @@ app.MapGet("/notifications/stats", (ILogger<Program> log) =>
 .WithOpenApi();
 
 app.Run();
+
+// Log service shutdown
+logger.LogInformation("🛑 Notification Service shutting down on {timestamp}", DateTime.UtcNow);
+logger.LogInformation("📬 Final notification count: {count}", notifications.Count);
 
 public class CreateNotificationRequest
 {
