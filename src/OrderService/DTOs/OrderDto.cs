@@ -1,6 +1,13 @@
-namespace OrderService.Models;
+namespace OrderService.DTOs;
 
-public class Order
+public class CreateOrderRequest
+{
+    public int ProductId { get; set; }
+    public int Quantity { get; set; }
+    public string CustomerName { get; set; } = string.Empty;
+}
+
+public class OrderResponse
 {
     public int Id { get; set; }
     public int ProductId { get; set; }
